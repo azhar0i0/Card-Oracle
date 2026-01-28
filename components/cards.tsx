@@ -2,24 +2,25 @@ import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useRef, useState } from 'react';
 import { Animated, Dimensions, Pressable, Text, View } from 'react-native';
 import RandomCard from './RandomCard';
+import { supabase } from '@/lib/supabase';
 
 const { width } = Dimensions.get('window');
 const CARD_COUNT = 5;
 
-const ORACLE_CARDS = [
-  { title: 'Take a Step Forward', message: 'Do a step forward. Everything else will come along the way.' },
-  { title: 'Trust the Pause', message: 'Stillness is not stagnation. Something is aligning.' },
-  { title: 'Release Control', message: 'What you let go of makes space for what is meant.' },
-];
-
 export default function OracleCard() {
   const [shuffling, setShuffling] = useState(false);
   const [showResult, setShowResult] = useState(false);
-  const [selectedCard, setSelectedCard] = useState(ORACLE_CARDS[0]);
+  const [selectedCard, setSelectedCard] = useState<{
+    id: string;
+    name: string;
+    number: string;
+    description: string;
+    image_url: string | null;
+  } | null>(null);
 
   const deckScale = useRef(new Animated.Value(1)).current;
   const deckOpacity = useRef(new Animated.Value(1)).current;
-  const cardAnimations = useRef<Array<{x: Animated.Value; y: Animated.Value; rotate: Animated.Value; opacity: Animated.Value; scale: Animated.Value}>>([]);
+  const cardAnimations = useRef<Array<{ x: Animated.Value; y: Animated.Value; rotate: Animated.Value; opacity: Animated.Value; scale: Animated.Value }>>([]);
 
   // Initialize card animations
   if (cardAnimations.current.length === 0) {
@@ -34,10 +35,34 @@ export default function OracleCard() {
     }
   }
 
-  const onShuffleFinished = useCallback(() => {
-    const random = ORACLE_CARDS[Math.floor(Math.random() * ORACLE_CARDS.length)];
-    setSelectedCard(random);
-    
+  const onShuffleFinished = useCallback(async () => {
+    // Get total count
+    const { count, error: countError } = await supabase
+      .from('cards')
+      .select('*', { count: 'exact', head: true });
+
+    if (countError || !count) {
+      console.error('Error getting card count:', countError);
+      return;
+    }
+
+    // Pick random offset
+    const randomOffset = Math.floor(Math.random() * count);
+
+    // Fetch one card at random offset
+    const { data, error } = await supabase
+      .from('cards')
+      .select('id, name, number, description, image_url')
+      .range(randomOffset, randomOffset)
+      .single();
+
+    if (error) {
+      console.error('Error fetching card:', error);
+      return;
+    }
+
+    setSelectedCard(data);
+
     setTimeout(() => {
       setShowResult(true);
     }, 200);
@@ -45,7 +70,7 @@ export default function OracleCard() {
 
   const startShuffle = () => {
     if (shuffling) return;
-    
+
     setShowResult(false);
     setShuffling(true);
     Animated.timing(deckOpacity, {
@@ -58,17 +83,15 @@ export default function OracleCard() {
     cardAnimations.current.forEach((anim, index) => {
       const isEven = index % 2 === 0;
       const direction = isEven ? -1 : 1;
-      const delay = index * 60; // Smooth cascade timing
+      const delay = index * 60;
 
       setTimeout(() => {
         Animated.parallel([
-          // Fade in smoothly
           Animated.timing(anim.opacity, {
             toValue: 1,
             duration: 200,
             useNativeDriver: false,
           }),
-          // X movement with spring for natural feel
           Animated.sequence([
             Animated.spring(anim.x, {
               toValue: direction * (width * 0.3),
@@ -83,7 +106,6 @@ export default function OracleCard() {
               useNativeDriver: false,
             }),
           ]),
-          // Rotation with spring
           Animated.sequence([
             Animated.spring(anim.rotate, {
               toValue: direction * 18,
@@ -98,7 +120,6 @@ export default function OracleCard() {
               useNativeDriver: false,
             }),
           ]),
-          // Scale with spring
           Animated.sequence([
             Animated.spring(anim.scale, {
               toValue: 1.12,
@@ -117,7 +138,6 @@ export default function OracleCard() {
       }, delay);
     });
 
-    // Trigger result after shuffle completes
     setTimeout(() => {
       setShuffling(false);
       onShuffleFinished();
@@ -239,11 +259,13 @@ export default function OracleCard() {
       )}
 
       {/* Result popup */}
-      <RandomCard
-        visible={showResult}
-        card={selectedCard}
-        onClose={closeResult}
-      />
+      {selectedCard && (
+        <RandomCard
+          visible={showResult}
+          card={selectedCard}
+          onClose={closeResult}
+        />
+      )}
     </View>
   );
 }
